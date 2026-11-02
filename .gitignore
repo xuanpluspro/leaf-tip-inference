@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.pth
+*.pt
+*.onnx
+*.tmp
+data/*
+!data/README.md
+weights/*
+!weights/README.md
+outputs/

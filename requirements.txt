@@ -1,0 +1,5 @@
+# Preserve the GPU image's matching torch/torchvision installation.
+# Install torch + torchvision separately for your GPU if not already available.
+numpy>=1.24
+Pillow>=9.5
+scipy>=1.10
