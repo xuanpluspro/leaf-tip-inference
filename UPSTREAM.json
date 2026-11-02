@@ -1,0 +1,18 @@
+{
+  "PET": {
+    "repository": "https://github.com/xuanpluspro/PET",
+    "commit": "56a3b616aef95f0ddb7841da99fae9404311791a"
+  },
+  "p2rloss": {
+    "repository": "https://github.com/xuanpluspro/p2rloss",
+    "commit": "8833ceb04c352bdd600cc421680c668a458b3ecd"
+  },
+  "apgcc-leaf-counting": {
+    "repository": "https://github.com/xuanpluspro/apgcc-leaf-counting",
+    "commit": "663cc3259f637f8c12b4eab1e447faff986d2ce0"
+  },
+  "sah-leaf-counting": {
+    "repository": "https://github.com/xuanpluspro/sah-leaf-counting",
+    "commit": "f7a66e372556c981f2256fc234258a188acd10f2"
+  }
+}
