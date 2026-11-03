@@ -86,6 +86,67 @@ outputs/ck1_pet/
 
 坐标始终是原图像素 xy，右/下 padding 区预测会删除。TXT 每行 x y；JSON 额外保存前景概率、阈值和数量。counts.csv 每完成一张原子更新，包含数量、原尺寸、推理秒数、保存秒数和 PyTorch 峰值已分配 GiB。耗时包含 CPU 标准化、GPU 推理、筛选和坐标回传，不包含读图/加载模型/保存图片，不等同于纯网络延迟。没有 GT 时不报告 MAE/F1 等精度指标。
 
+## 导入 Labelme / X-AnyLabeling 人工修正
+
+`points/*.json` 是本仓库的预测记录，不是标注软件格式。新增 `export_annotations.py` 将**已经推理完成的结果**转为 Labelme/X-AnyLabeling 可读取的点标注 JSON，不需要重新加载模型或 GPU。
+
+```bash
+python export_annotations.py \
+  --input data/ck1 \
+  --predictions outputs/ck1_pet \
+  --output review/ck1_pet \
+  --label leaf_tip
+```
+
+`--predictions` 指向含有 `meta/run.json` 和 `points/` 的推理结果根目录，不是直接指定 `points/`。四个模型共用这一导出入口，替换结果目录即可。若之前用了 `--no-save-points`，需要先重新推理保存坐标。
+
+导出只读取运行清单中已完成的图片；例如先推理一张，也可以只导出这一张，不要求整批结束。需使用推理时相同的原图，不要拿叠加图作为输入。
+
+```text
+review/ck1_pet/
+  523_ck1_BLN.jpg
+  523_ck1_BLN.json
+  子目录/
+    另一张图片.png
+    另一张图片.json
+```
+
+- 图像文件直接复制原始字节，不缩放、不重新压缩；原目录不修改。导出包因此会额外占用一份原图空间。
+- JSON 与图片同目录、同主干，`imagePath` 仅保存图片文件名；整个文件夹搬到 Windows 后仍能关联原图。
+- `imageData: null`，不把图片再次以 Base64 放进 JSON，避免标签体积膨胀。
+- 每个形状是 `shape_type: point`，`points: [[x,y]]`，坐标为原图像素浮点数。默认标签 `leaf_tip` 可用 `--label` 更改。
+- 置信度保留在各 shape 的 `score` 字段；手工新增点无需填写 score。GUI 是否显示或保留该扩展字段取决于版本，不影响坐标回转。
+- `checked: false` 表示未审核。JSON 的 `version: 5.0.1` 采用常见 Labelme 兼容格式标记，不表示导出脚本依赖该软件版本。
+- 默认导出全部已保存预测，包括零预测图片（`shapes: []`），方便人工补点。可显式加 `--min-score 0.7` 进一步过滤，但不能恢复推理时已经被阈值丢弃的点。
+- 检查坐标范围、尺寸和记录数量；存在非正常 EXIF 旋转标记时拒绝导出，以免标注软件自动旋转图片造成坐标错位。应在推理前统一图像方向后重跑，不会暗中旋转坐标。
+
+将 `review/ck1_pet/` 整个文件夹下载到本地。在 Labelme 或 X-AnyLabeling 中打开图片文件夹或对应 JSON，删除误检点、拖动偏移点、用 point 工具补充漏点，保存到这个导出包中。存在子目录时逐个打开需要处理的子目录。
+
+**导出目录必须尚不存在，没有覆盖开关。** 重复导出会报错，保护已人工修正的 JSON；需要另一批结果时用新目录。推理入口仍保留原来的 TXT/坐标 JSON/overlay 输出，不直接往原图目录写标签。
+
+### 修正后转回训练点标注
+
+在完成审核的本地导出包上执行（只需 numpy/Pillow，不需要 torch 或标注软件 Python 包）：
+
+```bash
+python annotations_to_points.py \
+  --input review/ck1_pet \
+  --output corrected/ck1_pet/PointAnnotations \
+  --label leaf_tip
+```
+
+生成同名 `.txt`，每行 `x y`，可用于当前 RiceW3999 风格的数据加载器。目录层级保留；现有训练集若要求平铺，请先统一图片/标注文件主干及目录，不会自动重建训练/验证划分。
+
+回转读取人工保存后的 `shapes`，不依赖旧预测分数或数量，因此删点、移点、补点都会反映到新 TXT。全空标注生成空 TXT；重复坐标、越界坐标、非 point 形状或意外标签会明确报错，不静默删除标注。回转目录也必须是新目录，不修改 JSON、原图或既有训练标注。
+
+程序不能判断你是否逐张完成了人工审核：未经修正的预测仍是伪标签，不应直接当作人工 GT；新标注用于训练与独立测试时，应保持合理划分。
+
+格式依据官方读取逻辑核对：
+[Labelme](https://github.com/wkentaro/labelme/blob/main/labelme/_label_file.py)、
+[X-AnyLabeling](https://github.com/CVHub520/X-AnyLabeling/blob/main/anylabeling/views/labeling/label_file.py)、
+[X-AnyLabeling point shape](https://github.com/CVHub520/X-AnyLabeling/blob/main/anylabeling/views/labeling/shape.py)。
+新增 14 项不运行模型的测试，覆盖导出格式、中文路径、图像字节不变、零点、保护人工修改及模拟删/移/补点后的回转。尚未在桌面 GUI 实际打开验证；建议先导出一张，在你的软件版本中确认显示和保存正常。
+
 ## 中断续跑与覆盖
 
 相同命令加 --resume；核对模型、权重 SHA256、输入根目录、源码版本及预测/可视化设置。输入逐图 size/mtime 变化时重新处理，未完成文件重做。不能检测刻意维持 size/mtime 的内容篡改，也不验证被人为修改的输出文件。切换模型、权重、阈值或模式，建议新目录；若明确想覆盖，可用 --overwrite。
