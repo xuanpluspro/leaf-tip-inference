@@ -7,6 +7,14 @@ __pycache__/
 *.tmp
 data/*
 !data/README.md
-weights/*
+weights/**
 !weights/README.md
+!weights/pet/
+!weights/pet/README.md
+!weights/p2rloss/
+!weights/p2rloss/README.md
+!weights/apgcc/
+!weights/apgcc/README.md
+!weights/sah/
+!weights/sah/README.md
 outputs/

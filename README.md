@@ -35,7 +35,16 @@ git clone https://github.com/xuanpluspro/leaf-tip-inference.git
 cd leaf-tip-inference
 ```
 
-把图片放 data/ck1/，将训练完成的权重放 weights/（也可使用外部绝对路径）。不需要另外准备 vgg16_bn-6c64b313.pth。
+把图片放 `data/ck1/`，训练完成的权重按模型分别放在 `weights/pet/`、`weights/p2rloss/`、`weights/apgcc/`、`weights/sah/`。这些目录已随仓库创建，可以保留训练时的原文件名，同名文件不会冲突。详见 [权重目录说明](weights/README.md)。不需要另外准备 vgg16_bn-6c64b313.pth。
+
+| 模型 | 建议权重路径 |
+|---|---|
+| PET | `weights/pet/best_checkpoint.pth` |
+| P2RLoss | `weights/p2rloss/ckpt_epoch_best.pth` |
+| APGCC | `weights/apgcc/best_checkpoint.pth` |
+| SAH | `weights/sah/best_checkpoint.pth` |
+
+推理仍需同时明确指定 `--model` 和 `--weights`，不会根据同名文件自动猜测模型。已有外部绝对路径和旧权重路径仍可使用，不自动移动、重命名或覆盖文件。一个模型保留多次实验时，可继续建实验子目录，例如 `weights/sah/ricew3999_ep50_bs40_run1/best_checkpoint.pth`。
 
 | --model | 原始权重来源 | 默认前景筛选 | 补齐倍数 |
 |---|---|---|---|
@@ -50,20 +59,20 @@ cd leaf-tip-inference
 
 ## 开始推理
 
-PET 整图示例（你当前完成训练的路径仍带 bs16，但实际最后使用 batch 8）：
+PET 整图示例（先将训练好的权重复制到对应目录）：
 
 ```bash
 python -u predict.py --model pet \
-  --weights /root/gpufree-data/PET/outputs/RiceW3999/ricew3999_pet_ep50_bs16_run1/best_checkpoint.pth \
+  --weights weights/pet/best_checkpoint.pth \
   --input data/ck1 --output outputs/ck1_pet --mode full --trust-checkpoint
 ```
 
 其他模型使用同一入口、独立输出目录：
 
 ```bash
-python -u predict.py --model p2rloss --weights weights/p2rloss_best.pth --input data/ck1 --output outputs/ck1_p2rloss --mode full --trust-checkpoint
-python -u predict.py --model apgcc --weights weights/apgcc_best.pth --input data/ck1 --output outputs/ck1_apgcc --mode full --trust-checkpoint
-python -u predict.py --model sah --weights weights/sah_best.pth --input data/ck1 --output outputs/ck1_sah --mode full --trust-checkpoint
+python -u predict.py --model p2rloss --weights weights/p2rloss/ckpt_epoch_best.pth --input data/ck1 --output outputs/ck1_p2rloss --mode full --trust-checkpoint
+python -u predict.py --model apgcc --weights weights/apgcc/best_checkpoint.pth --input data/ck1 --output outputs/ck1_apgcc --mode full --trust-checkpoint
+python -u predict.py --model sah --weights weights/sah/best_checkpoint.pth --input data/ck1 --output outputs/ck1_sah --mode full --trust-checkpoint
 ```
 
 先在新输出目录加 --max-images 1 做一张图的 GPU 检查；确认权重兼容、效果和显存后，去掉 --max-images，加 --resume 继续整个文件夹。max-images 只限制处理数量，不改变预测设置。
@@ -156,8 +165,8 @@ python annotations_to_points.py \
 ## 可选：瘦身模型文件
 
 ```bash
-python slim_checkpoint.py --model pet --weights weights/pet_best.pth --output weights/pet_inference.pth --trust-checkpoint
-python slim_checkpoint.py --model p2rloss --weights weights/p2rloss_best.pth --output weights/p2rloss_inference.pth --p2r-weights student --trust-checkpoint
+python slim_checkpoint.py --model pet --weights weights/pet/best_checkpoint.pth --output weights/pet/inference.pth --trust-checkpoint
+python slim_checkpoint.py --model p2rloss --weights weights/p2rloss/ckpt_epoch_best.pth --output weights/p2rloss/inference.pth --p2r-weights student --trust-checkpoint
 ```
 
 APGCC/SAH 同理。仅保留选择的一个模型及构造所需元数据，删除优化器/RNG/未选择的教师等；不转换 FP16，不剪枝，逐张量校验数值/dtype/shape，原文件保留。瘦身文件可直接由本仓库加载，不能用于完整续训，也不承诺可以直接交给其他训练仓库的加载器。
