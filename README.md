@@ -5,8 +5,8 @@
 ## 默认输出和行为
 
 - GPU 单图整图推理，默认 FP32，与训练仓库验证精度设置一致。不会自动缩放、切块或切换 CPU。
-- 默认保存红色实心预测点、白色描边 + 数量文字的 JPG 叠加图，文件名 leaf_overlay.jpg，quality=90；保持原始尺寸。
-- 同时直接保存可编辑标注包 annotations/（原图副本＋Labelme/X-AnyLabeling点标注JSON）、xy 坐标 TXT/JSON、counts.csv、meta/ 日志和运行清单；全部在 --output 指定目录。
+- 默认保存红色实心预测点、白色描边（不显示文字）的 JPG 叠加图，文件名 leaf_overlay.jpg，quality=90；保持原始尺寸。
+- 同时直接保存可编辑标注包 annotations/（仅 Labelme/X-AnyLabeling 点标注JSON，不复制原图）、xy 坐标 JSON（TXT默认关闭）、counts.csv、meta/ 日志和运行清单；全部在 --output 指定目录。
 - --mode tile 显式启用滑窗；默认窗口 512、重叠 128；每次处理一块，归属边界剔除重叠区重复预测。不做距离 NMS，以免删除相邻真实叶尖。
 - --resume 跳过已完成图片；--overwrite 全部重算并覆盖同名输出，二者互斥。
 - 可选 --amp 开启 FP16 autocast；不保证与 FP32 数值或阈值附近计数完全一致。
@@ -81,7 +81,7 @@ python -u predict.py --model sah --weights weights/sah/best_checkpoint.pth --inp
 
 --threshold 0.5 为四者统一的前景概率阈值。P2RLoss 这里传的是概率阈值，不是旧 infer_sudan.py 的原始 logit 阈值；0.5 对应 logit 0。--p2r-weights teacher 可选择教师，但默认学生才与当前训练验证保持一致。
 
-默认点大小按图像短边自适应：3072×3072 时半径15像素、白边3像素，计数字体约66像素；`--radius 10` 可显式调小，改变画点不影响计数；--jpg-quality 90 控制磁盘压缩质量；--no-save-points 仅保存 overlay/CSV，不输出逐图 TXT/JSON。支持递归子目录；同目录 leaf.jpg 和 leaf.png 会报输出命名冲突，不生成双扩展名。中文路径采用文件对象读写。
+默认点大小按图像短边自适应：3072×3072 时半径15像素、白边3像素；`--radius 10` 可显式调小，改变画点不影响计数；--jpg-quality 90 控制磁盘压缩质量；--no-save-points 仅保存 overlay/CSV，不输出逐图 TXT/JSON。支持递归子目录；同目录 leaf.jpg 和 leaf.png 会报输出命名冲突，不生成双扩展名。中文路径采用文件对象读写。
 
 ```text
 outputs/ck1_pet/
@@ -97,7 +97,7 @@ outputs/ck1_pet/
 
 ## 导入 Labelme / X-AnyLabeling 人工修正
 
-新推理默认直接在 `annotations/` 保存原图副本与同名标注软件 JSON，无需转换；`points/*.json` 仍是本仓库的预测记录。已有旧结果可用 `export_annotations.py` 将**已经推理完成的结果**转为 Labelme/X-AnyLabeling 可读取的点标注 JSON，不需要重新加载模型或 GPU。
+新推理默认直接在 `annotations/` 仅保存同名标注软件 JSON，不复制原图，无需转换；`points/*.json` 仍是本仓库的预测记录。已有旧结果可用 `export_annotations.py` 将**已经推理完成的结果**转为 Labelme/X-AnyLabeling 可读取的点标注 JSON，不需要重新加载模型或 GPU。
 
 ```bash
 python export_annotations.py \
@@ -186,19 +186,15 @@ python -m compileall -q inference vendor predict.py slim_checkpoint.py
 
 
 
-## 直接生成可编辑标注与大图可视化
+## 简洁可视化与节省磁盘的标注输出
 
-新推理默认 `--save-annotations`，每完成一图就在同一结果目录的 `annotations/` 下复制原始图片字节并生成同名 JSON，子目录保持一致。JSON 的 imagePath 仅为同目录原图文件名，imageData=null，不内嵌图片；shape_type=point，默认标签 leaf_tip，原图坐标与置信度不变，checked=false。无预测也保存空 shapes，方便补点。默认预检 EXIF 方向和多帧图像，避免标注坐标错位。
+- overlays/：保持原尺寸的 JPG，仅画红点＋白边，不写数量或文件名。3072方图默认点半径15px、白边3px，--radius 可调整。
+- annotations/：仅保存 Labelme/X-AnyLabeling 点标注 JSON，不复制原图、不内嵌图像（imageData=null）。imagePath 为原图文件名。
+- points/：默认保留预测坐标/置信度记录 JSON；不生成 TXT。需要时显式 --save-txt；--no-save-points 关闭该记录 JSON，不影响标注 JSON。
+- counts.csv、meta/：保留计数和运行记录。
 
-例如 `outputs/crop3072_sah/annotations/图片.jpg` 和 `图片.json`，下载整个 annotations 文件夹后在 Labelme/X-AnyLabeling 打开。这个目录不含 overlay，标注软件使用的是原图。保留 points/ 的统计记录和 TXT，不改变模型预测、全图/滑窗逻辑及阈值。annotations 中原图副本会增加约一份输入图片的磁盘占用；`--no-save-annotations` 可关闭此输出，`--annotation-label leaf_tip` 修改标签。`--no-save-points` 只关闭 points/，不关闭 annotations/。
+下载 annotations/ 中的 JSON，放到本地对应原图的同一个文件夹，主干保持一致，例如 图片.jpg 与 图片.json，再用标注软件打开。有子目录时按原目录层级放置。不要关联 overlays 中的叠加图。本地已有原图无需再从服务器下载。
 
-```bash
-python -u predict.py --model sah --weights weights/sah/best_inference.pth \
-  --input data/crop3072 --output outputs/crop3072_sah_v2 --mode full
-```
+旧目录已有的副本和TXT不自动删除；--overwrite仅替换本次输出，不清理旧文件。新设置与旧运行配置不同，请使用新输出目录，不能直接 --resume 旧配置。--overwrite会覆盖同名标注JSON，包括人工修改内容，请保护审核文件。
 
-PET 使用 --model pet、对应 weights/pet/best_inference.pth 和独立输出目录即可。新旧可视化/标注设置不同，旧输出不能直接 --resume：推荐新目录。若明确 --overwrite，会重算并覆盖 annotations 中同名图片和 JSON，**包括人工修改的标注**；人工审核应放在单独下载的副本中，不要对其覆盖推理。相同设置 --resume 跳过已完成且各输出存在的图片，不重写其 JSON。
-
-红点半径按短边/1024×5取整，最小4像素，3072图默认15像素；白边约半径/5，增强复杂背景可读性。计数采用黄字黑底，可视化尺寸保持原图。点的显示半径不是匹配容差，不影响预测或计数。GUI中的点显示大小由标注软件自己控制，overlay大小不会改变JSON点几何。
-
-已有推理记录仍可使用 export_annotations.py 转换，无须重新推理；新版可视化需要重新绘制/运行推理。轻量测试核对JSON字段、原图字节、坐标回转、大图红点半径和白边；尚未在桌面GUI实际打开验证，也不代表模型精度或CUDA验证。
+已有 export_annotations.py 仍是可选的完整打包工具，会复制原图；默认推理不调用它，不需要额外转换。GUI点大小由软件控制。模型推理、坐标和计数保持不变。

@@ -3,7 +3,7 @@ from pathlib import Path
 import uuid
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 EXTENSIONS={'.jpg','.jpeg','.png','.bmp','.tif','.tiff'}
 
@@ -37,7 +37,7 @@ def plan_images(source,output):
 
 
 def draw_points(image,points,radius=None):
-    # At 3072px: radius 15, white outline 3px, count font 66px.
+    # At 3072px: radius 15, white outline 3px; no text overlay.
     scale=min(image.size)/1024.
     radius=max(4,round(5*scale)) if radius is None else radius
     outline=max(1,round(radius/5))
@@ -46,19 +46,6 @@ def draw_points(image,points,radius=None):
     for x,y in points:
         draw.ellipse((float(x)-radius,float(y)-radius,float(x)+radius,float(y)+radius),
                      fill=(255,0,0),outline=(255,255,255),width=outline)
-    label=f'Count: {len(points)}'
-    font_size=max(16,round(22*scale))
-    try:
-        font=ImageFont.truetype('DejaVuSans.ttf',font_size)
-    except OSError:
-        try:
-            font=ImageFont.load_default(size=font_size)
-        except TypeError:
-            font=ImageFont.load_default()
-    padding=max(6,round(8*scale))
-    box=draw.textbbox((0,0),label,font=font)
-    draw.rectangle((0,0,box[2]-box[0]+2*padding,box[3]-box[1]+2*padding),fill=(0,0,0))
-    draw.text((padding-box[0],padding-box[1]),label,font=font,fill=(255,255,0))
     return result
 
 

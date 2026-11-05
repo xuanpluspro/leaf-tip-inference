@@ -9,7 +9,7 @@ import time
 from PIL import Image
 
 from inference.engine import predict_image
-from inference.annotations import annotation_payload,validate_image,save_annotation_pair
+from inference.annotations import annotation_payload,validate_image
 from inference.images import plan_images,draw_points,save_jpeg
 from inference.records import sha256_file,open_run,atomic_json,atomic_text,export_counts
 
@@ -31,7 +31,8 @@ def parser():
     p.add_argument('--save-annotations',action=argparse.BooleanOptionalAction,default=True)
     p.add_argument('--annotation-label',default='leaf_tip')
     p.add_argument('--jpg-quality',type=int,default=90)
-    p.add_argument('--save-points',action=argparse.BooleanOptionalAction,default=True)
+    p.add_argument('--save-points',action=argparse.BooleanOptionalAction,default=True,help='Save prediction-record JSON; TXT disabled unless --save-txt')
+    p.add_argument('--save-txt',action=argparse.BooleanOptionalAction,default=False,help='Optional training-style coordinates; default off')
     p.add_argument('--max-images',type=int,default=0,help='0=all; e.g. 1 for initial GPU smoke check')
     p.add_argument('--trust-checkpoint',action='store_true',help='Allow pickle for your own trusted legacy training checkpoint only')
     group=p.add_mutually_exclusive_group()
@@ -68,7 +69,7 @@ def main(args):
                 threshold=args.threshold,p2r_weights=args.p2r_weights,amp=args.amp,
                 radius=args.radius,jpg_quality=args.jpg_quality,save_points=args.save_points,
                 save_annotations=args.save_annotations,annotation_label=args.annotation_label,
-                visualization_version=2,
+                visualization_version=3,annotation_image_mode='external-basename',save_txt=args.save_txt,
                 upstream=json.loads((Path(__file__).parent/'UPSTREAM.json').read_text(encoding='utf-8')))
     # Load and validate the model before resetting an existing run's metadata.
     adapter=Adapter(args.model,args.weights,device,args.threshold,args.p2r_weights,args.trust_checkpoint)
@@ -91,11 +92,13 @@ def main(args):
             signature=dict(size=stat.st_size,mtime_ns=stat.st_mtime_ns)
             json_path=output/'points'/relative.parent/(relative.stem+'.json')
             txt_path=json_path.with_suffix('.txt')
-            required=[overlay]+([json_path,txt_path] if args.save_points else [])
+            required=[overlay]+([json_path] if args.save_points else [])
+            if args.save_txt:
+                required.append(txt_path)
             annotation_image=output/'annotations'/relative
             annotation_json=annotation_image.with_suffix('.json')
             if args.save_annotations:
-                required += [annotation_image,annotation_json]
+                required += [annotation_json]
             previous=state['completed'].get(key)
             if previous and previous['input']==signature and all(p.is_file() for p in required):
                 logger.info('[%d/%d] skip completed %s',index,len(plan),key)
@@ -120,12 +123,13 @@ def main(args):
             save_begin=time.perf_counter()
             point_rows=[dict(x=float(x),y=float(y),score=float(s)) for (x,y),s in zip(points,scores)]
             if args.save_annotations:
-                save_annotation_pair(path,annotation_image,annotation_payload(relative.name,image.width,image.height,point_rows,args.annotation_label))
+                atomic_json(annotation_json,annotation_payload(relative.name,image.width,image.height,point_rows,args.annotation_label))
             if args.save_points:
                 atomic_json(json_path,dict(image=key,model=args.model,count=len(points),width=image.width,
                     height=image.height,coordinate_order='xy',coordinate_unit='original-image pixels',
                     score_kind='foreground probability',threshold=args.threshold,
                     points=point_rows))
+            if args.save_txt:
                 atomic_text(txt_path,''.join(f'{x:.6f} {y:.6f}\n' for x,y in points))
             save_jpeg(draw_points(image,points,args.radius),overlay,args.jpg_quality)
             state['completed'][key]=dict(input=signature,count=len(points),width=image.width,height=image.height,
