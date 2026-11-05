@@ -9,6 +9,7 @@ import time
 from PIL import Image
 
 from inference.engine import predict_image
+from inference.annotations import annotation_payload,validate_image,save_annotation_pair
 from inference.images import plan_images,draw_points,save_jpeg
 from inference.records import sha256_file,open_run,atomic_json,atomic_text,export_counts
 
@@ -26,7 +27,9 @@ def parser():
     p.add_argument('--p2r-weights',choices=['student','teacher'],default='student')
     p.add_argument('--device',default='cuda:0')
     p.add_argument('--amp',action=argparse.BooleanOptionalAction,default=False,help='Optional FP16 autocast; default FP32 matches validation')
-    p.add_argument('--radius',type=int,default=4)
+    p.add_argument('--radius',type=int,default=None,help='Point radius in original pixels; default auto: 15px at 3072 square')
+    p.add_argument('--save-annotations',action=argparse.BooleanOptionalAction,default=True)
+    p.add_argument('--annotation-label',default='leaf_tip')
     p.add_argument('--jpg-quality',type=int,default=90)
     p.add_argument('--save-points',action=argparse.BooleanOptionalAction,default=True)
     p.add_argument('--max-images',type=int,default=0,help='0=all; e.g. 1 for initial GPU smoke check')
@@ -38,8 +41,10 @@ def parser():
 
 
 def main(args):
-    if not 0<args.threshold<1 or not 1<=args.jpg_quality<=100 or args.radius<1 or args.max_images<0:
+    if not 0<args.threshold<1 or not 1<=args.jpg_quality<=100 or (args.radius is not None and args.radius<1) or args.max_images<0:
         raise ValueError('Invalid threshold, JPG quality, radius or max-images')
+    if not args.annotation_label.strip():
+        raise ValueError('annotation-label cannot be empty')
     if args.tile_size<256 or args.tile_size%256 or not 0<=args.overlap<args.tile_size:
         raise ValueError('tile-size must be >=256 and a multiple of 256; 0 <= overlap < tile-size')
     if args.model!='p2rloss' and args.p2r_weights!='student':
@@ -52,12 +57,18 @@ def main(args):
     torch.cuda.set_device(device)
     source,output=args.input.resolve(),args.output.resolve()
     plan=plan_images(source,output)
+    if args.save_annotations:
+        for path,_,_ in plan:
+            with Image.open(path) as image:
+                validate_image(path,image.width,image.height)
     if args.max_images:
         plan=plan[:args.max_images]
     config=dict(model=args.model,weights_sha256=sha256_file(args.weights),source=str(source),
                 mode=args.mode,tile_size=args.tile_size,overlap=args.overlap,
                 threshold=args.threshold,p2r_weights=args.p2r_weights,amp=args.amp,
                 radius=args.radius,jpg_quality=args.jpg_quality,save_points=args.save_points,
+                save_annotations=args.save_annotations,annotation_label=args.annotation_label,
+                visualization_version=2,
                 upstream=json.loads((Path(__file__).parent/'UPSTREAM.json').read_text(encoding='utf-8')))
     # Load and validate the model before resetting an existing run's metadata.
     adapter=Adapter(args.model,args.weights,device,args.threshold,args.p2r_weights,args.trust_checkpoint)
@@ -81,6 +92,10 @@ def main(args):
             json_path=output/'points'/relative.parent/(relative.stem+'.json')
             txt_path=json_path.with_suffix('.txt')
             required=[overlay]+([json_path,txt_path] if args.save_points else [])
+            annotation_image=output/'annotations'/relative
+            annotation_json=annotation_image.with_suffix('.json')
+            if args.save_annotations:
+                required += [annotation_image,annotation_json]
             previous=state['completed'].get(key)
             if previous and previous['input']==signature and all(p.is_file() for p in required):
                 logger.info('[%d/%d] skip completed %s',index,len(plan),key)
@@ -103,15 +118,19 @@ def main(args):
             seconds=time.perf_counter()-begin
             peak=torch.cuda.max_memory_allocated(device)/2**30
             save_begin=time.perf_counter()
+            point_rows=[dict(x=float(x),y=float(y),score=float(s)) for (x,y),s in zip(points,scores)]
+            if args.save_annotations:
+                save_annotation_pair(path,annotation_image,annotation_payload(relative.name,image.width,image.height,point_rows,args.annotation_label))
             if args.save_points:
                 atomic_json(json_path,dict(image=key,model=args.model,count=len(points),width=image.width,
                     height=image.height,coordinate_order='xy',coordinate_unit='original-image pixels',
                     score_kind='foreground probability',threshold=args.threshold,
-                    points=[dict(x=float(x),y=float(y),score=float(s)) for (x,y),s in zip(points,scores)]))
+                    points=point_rows))
                 atomic_text(txt_path,''.join(f'{x:.6f} {y:.6f}\n' for x,y in points))
             save_jpeg(draw_points(image,points,args.radius),overlay,args.jpg_quality)
             state['completed'][key]=dict(input=signature,count=len(points),width=image.width,height=image.height,
                 inference_seconds=seconds,save_seconds=time.perf_counter()-save_begin,peak_allocated_gib=peak,
+                annotation=str(annotation_json.relative_to(output)) if args.save_annotations else '',
                 overlay=str(overlay.relative_to(output)),points=str(json_path.relative_to(output)) if args.save_points else '')
             atomic_json(manifest,state)
             export_counts(output,state,keys)
@@ -125,3 +144,4 @@ def main(args):
 
 if __name__=='__main__':
     main(parser().parse_args())
+

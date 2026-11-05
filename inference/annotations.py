@@ -55,6 +55,21 @@ def validate_image(path,width,height):
         if getattr(image,'n_frames',1)!=1: raise ValueError(f'Multi-frame image not supported for annotation export: {path}')
 
 
+def save_annotation_pair(source,target,payload):
+    """Copy exact original bytes and write a sibling editable JSON atomically."""
+    target=Path(target)
+    target.parent.mkdir(parents=True,exist_ok=True)
+    fd,name=tempfile.mkstemp(prefix='.'+target.name+'.',suffix='.tmp',dir=target.parent)
+    os.close(fd)
+    temporary=Path(name)
+    try:
+        shutil.copy2(source,temporary)
+        os.replace(temporary,target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    atomic_json(target.with_suffix('.json'),payload)
+
+
 def new_destination(output,protected):
     output=Path(output).resolve()
     for path in protected:
@@ -153,3 +168,4 @@ def annotations_to_points(source,output,label='leaf_tip'):
     finally:
         if temporary.exists(): shutil.rmtree(temporary)
     return dict(images=len(plans),points=sum(p[2] for p in plans),output=str(output))
+
